@@ -27,7 +27,7 @@ public class VendorUrlRepository : Repository<VendorUrl>
     public VendorUrl GetByUrlOrId(VendorUrl url)
     {
         // First try exact match (by ID or exact URI)
-        var exactMatch = conn.QueryFirstOrDefault<VendorUrl>("select * from vendor_urls where \"Id\" = @id or (\"Uri\" = @Uri AND \"VendorId\" = @VendorId)", url);
+        var exactMatch = conn.QueryFirstOrDefault<VendorUrl>("select * from vendor_urls where \"Id\" = @Id or (\"Uri\" = @Uri AND \"VendorId\" = @VendorId)", url);
         if (exactMatch != null) return exactMatch;
         
         // If no exact match, try normalized comparison to catch duplicates with trailing slashes
