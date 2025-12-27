@@ -75,7 +75,7 @@
       <div
         class="urls"
         v-for="(v, k) in vendor.plantListingUris"
-        v-bind:key="k"
+        v-bind:key="v.id || v.uri || k"
       >
         {{ v.uri }}
         <span class="material-symbols-outlined" @click="removeUrl(v)">

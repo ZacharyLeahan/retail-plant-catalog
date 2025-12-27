@@ -685,6 +685,9 @@ public class VendorController : BaseController
             if (vendor == null)
                 return new GenericResponse { Success = false, Message = "Vendor not found" };
 
+            // Normalize trivial formatting issues so we don't create duplicates for "same URL" with whitespace.
+            request.Url = request.Url.Trim();
+
             // Initialize the plant crawler (needed for term lookup)
             plantCrawler.Init();
 
@@ -692,6 +695,8 @@ public class VendorController : BaseController
             var result = await plantCrawler.TestUrl(request.Url);
 
             // Create or update VendorUrl with test results
+            // If the client didn't send a UrlId, we may still be updating an existing URL row.
+            // We'll reuse an existing row's Id if found, otherwise create a new one.
             string urlId = request.UrlId ?? Guid.NewGuid().ToString();
 
             var vendorUrl = new VendorUrl
@@ -718,11 +723,32 @@ public class VendorController : BaseController
             if (existingUrl != null)
             {
                 vendorUrl.Id = existingUrl.Id;
+                urlId = existingUrl.Id ?? urlId;
                 await vendorUrlRepository.UpdateAsync(vendorUrl);
             }
             else
             {
-                await vendorUrlRepository.InsertAsync(vendorUrl);
+                try
+                {
+                    await vendorUrlRepository.InsertAsync(vendorUrl);
+                }
+                catch (Exception ex)
+                {
+                    // If a concurrent request inserted the same (VendorId, Uri), recover by updating instead.
+                    // This relies on the DB uniqueness constraint on ("VendorId","Uri").
+                    logger.Warn("InsertUrl hit possible duplicate; attempting update instead.", ex);
+                    var nowExisting = vendorUrlRepository.GetByUrlOrId(vendorUrl);
+                    if (nowExisting != null)
+                    {
+                        vendorUrl.Id = nowExisting.Id;
+                        urlId = nowExisting.Id ?? urlId;
+                        await vendorUrlRepository.UpdateAsync(vendorUrl);
+                    }
+                    else
+                    {
+                        throw;
+                    }
+                }
             }
 
             // Update CrawlErrors count for the vendor
