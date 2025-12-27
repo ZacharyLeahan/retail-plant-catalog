@@ -302,27 +302,48 @@ public class VendorController : BaseController
                 return NotFound("Vendor not found."); // 404
             }
 
+            static string NormalizeUrl(string url)
+            {
+                if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+                var normalized = url.Trim();
+                // Remove trailing slash to avoid duplicates like /page/12 vs /page/12/
+                if (normalized.Length > 1 && normalized.EndsWith("/"))
+                {
+                    normalized = normalized.Substring(0, normalized.Length - 1);
+                }
+                return normalized.ToLowerInvariant();
+            }
+
             // Update basic vendor information
             VendorMapper.MapUpdateToVendor(request, existingVendor);
 
             // Get existing URLs for this vendor
             var existingUrls = vendorUrlRepository.FindForVendor(existingVendor.Id!).ToList();
 
-            // Get the list of URLs being submitted
-            var submittedUrls = existingVendor.PlantListingUrls?.ToArray();
-            if (submittedUrls == null) submittedUrls = Array.Empty<string>();
+            // Get the list of URLs being submitted (normalize + dedup to keep save fast and consistent)
+            var submittedUrls = (request.PlantListingUrls ?? Array.Empty<string>())
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Select(NormalizeUrl)
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Distinct()
+                .ToArray();
+            existingVendor.PlantListingUrls = submittedUrls;
+            var submittedSet = new HashSet<string>(submittedUrls);
 
             // Find URLs that need to be removed (exist in DB but not in submission)
-            var urlsToRemove = existingUrls.Where(u => !submittedUrls.Contains(u.Uri));
+            var urlsToRemove = existingUrls.Where(u => !submittedSet.Contains(NormalizeUrl(u.Uri ?? "")));
             foreach (var url in urlsToRemove)
             {
                 vendorUrlRepository.Delete(url);
             }
 
-            // Save the submitted URLs
-            var uri = await vendorService.TestAndSaveUrls(existingVendor.Id!, submittedUrls.ToArray(), plantCrawler);
-            existingVendor.PlantListingUris = uri.ToArray();
-            existingVendor.CrawlErrors = existingVendor.PlantListingUris?.Count(u => u.LastStatus != CrawlStatus.None && u.LastStatus != CrawlStatus.Ok) ?? 0;
+            // Save the submitted URLs WITHOUT testing/crawling on save (keeps "Save" instant).
+            // URL testing happens when adding/testing a URL or when crawling.
+            await vendorService.SaveUrls(existingVendor.Id!, submittedUrls);
+
+            // Refresh crawl error count cheaply (no crawling)
+            var updatedUrls = vendorUrlRepository.FindForVendor(existingVendor.Id!).ToList();
+            existingVendor.CrawlErrors = updatedUrls.Count(u => u.LastStatus != CrawlStatus.None && u.LastStatus != CrawlStatus.Ok);
             vendorRepository.Update(existingVendor);
 
             return Ok(new

@@ -1,7 +1,7 @@
 <template>
   <div class="post">
     <h1 v-if="vendor.storeName == ''">Register Retail Native Nursery</h1>
-    <h1 v-if="vendor.storeName !== ''">Edit Volunteer Information</h1>
+    <h1 v-if="vendor.storeName !== ''">Edit Vendor Information</h1>
     <div class="form-holder">
       <p>
         <em class="info"
@@ -61,6 +61,9 @@
       /></label>
       <a @click="addUrl">
         <span class="material-symbols-outlined"> add_box </span>
+      </a>
+      <a @click="deduplicateUrls" v-if="vendor.plantListingUris && vendor.plantListingUris.length > 0" title="Remove duplicate URLs">
+        <span class="material-symbols-outlined" style="margin-left: 10px;"> filter_alt </span>
       </a>
       <br />
       <div class="error-holder" v-if="error">
@@ -222,6 +225,7 @@ export default Vue.extend({
                 .then(json => {
                     console.log(json)
                     this.vendor = json;
+                    this.deduplicateUrls(true); // Silent deduplication on load
                 });
             }
         }else{
@@ -229,6 +233,7 @@ export default Vue.extend({
             .then(json => {
                 console.log(json)
                 this.vendor = json;
+                this.deduplicateUrls(true); // Silent deduplication on load
             });
         }
         if (id){
@@ -240,6 +245,65 @@ export default Vue.extend({
         }
     },
     methods: {
+        normalizeUrl(url) {
+            if (!url) return "";
+            // Remove trailing slashes (except for root URLs)
+            var normalized = url.trim();
+            if (normalized.length > 1 && normalized.endsWith('/')) {
+                normalized = normalized.slice(0, -1);
+            }
+            // Convert to lowercase for comparison
+            normalized = normalized.toLowerCase();
+            return normalized;
+        },
+        deduplicateUrls(silent) {
+            if (!this.vendor.plantListingUris || this.vendor.plantListingUris.length === 0) {
+                return;
+            }
+            
+            var seen = new Map(); // Map normalized URL to the "best" URL object
+            var unique = [];
+            
+            for (var urlObj of this.vendor.plantListingUris) {
+                var uri = urlObj.uri || urlObj;
+                var normalized = this.normalizeUrl(uri);
+                
+                if (!seen.has(normalized)) {
+                    seen.set(normalized, urlObj);
+                    unique.push(urlObj);
+                } else {
+                    // If duplicate found, keep the one with better status or existing ID
+                    var existing = seen.get(normalized);
+                    // Prefer the one with an ID (already saved) or better status
+                    if ((!existing.id && urlObj.id) || 
+                        (existing.id && urlObj.id && (urlObj.lastStatus === 'Ok' || urlObj.lastStatus === 'None'))) {
+                        // Replace in the unique array
+                        var index = unique.indexOf(existing);
+                        if (index !== -1) {
+                            unique[index] = urlObj;
+                            seen.set(normalized, urlObj);
+                        }
+                    }
+                }
+            }
+            
+            // Only update if duplicates were found
+            if (unique.length !== this.vendor.plantListingUris.length) {
+                var removedCount = this.vendor.plantListingUris.length - unique.length;
+                console.log(`Removed ${removedCount} duplicate URLs`);
+                this.vendor.plantListingUris = unique;
+                // Only show message if not silent (i.e., user manually clicked the button)
+                if (!silent) {
+                    this.error = `Removed ${removedCount} duplicate URL(s).`;
+                    // Clear the message after 3 seconds
+                    setTimeout(() => {
+                        if (this.error === `Removed ${removedCount} duplicate URL(s).`) {
+                            this.error = "";
+                        }
+                    }, 3000);
+                }
+            }
+        },
         prettyDate(prefix, date){
             if (!date) {
                 return prefix + " Never";
@@ -251,6 +315,9 @@ export default Vue.extend({
             return prefix + " " + d.toLocaleDateString() + " " + d.toLocaleTimeString();
         },
         async submit(){
+            // Silently deduplicate URLs before submitting (don't show message)
+            this.deduplicateUrls(true);
+            
             var didValidate = await this.validate();
             if (!didValidate) return;
             console.log(this.vendor)
@@ -330,19 +397,10 @@ export default Vue.extend({
             }
             if (this.vendor.plantListingUris == null || this.vendor.plantListingUris.length === 0){
                 this.errors.push("There must be at least one Plant Listing URL.  Be sure to hit the add button")
-            }else{
-                console.log("listing urls breakpoint")
-                for (var uriObj of this.vendor.plantListingUris){
-                    var uri = uriObj.uri || uriObj; // Handle both object and string formats
-                    console.log("Evaluating url: " + uri)
-                    var result = await utils.getData("/vendor/IsAllowed?Url=" + encodeURIComponent(uri))
-                    if (!result.success){
-                        this.errors.push(`Unfortunately due to robots.txt policy we cannot spider this url [${uri}].  Please remove it`)
-                    }else{
-                        console.log("Allowed:" + uri)
-                    }
-                }
             }
+            // NOTE: We intentionally do NOT validate robots.txt / crawl-ability for every URL on Save.
+            // That made saving scale linearly with URL count and feel slow.
+            // URL checks happen when adding/testing URLs (TestUrl/ValidateUrl) and when crawling.
             if (this.role != 'Admin' && this.role != 'VolunteerPlus' && !this.agreeToTerms && !this.vendor.id){
                 this.errors.push("You must agree to the terms of service")
             }
@@ -363,7 +421,12 @@ export default Vue.extend({
             if (!this.vendor.plantListingUris) {
              this.vendor.plantListingUris = [];
            }
-           var dup = this.vendor.plantListingUris.filter(u => u.uri == this.plantListingUrl);
+           // Normalize the input URL and check against normalized existing URLs
+           var normalizedInput = this.normalizeUrl(this.plantListingUrl);
+           var dup = this.vendor.plantListingUris.filter(u => {
+               var existingUri = u.uri || u;
+               return this.normalizeUrl(existingUri) === normalizedInput;
+           });
            if (dup.length > 0){
             this.error = "Cannot enter a duplicate url."
             return;
@@ -383,43 +446,34 @@ export default Vue.extend({
 
                 console.log("Test result:", testResult);
 
-                // Add URL with test result status
-                const newUrl = {
-                  id: testResult.id,
-                  uri: this.plantListingUrl,
-                  lastStatus: testResult.message
-                };
-
-                // Add the URL to the list
-                this.vendor.plantListingUris.push(newUrl);
-
-                if (testResult.success) {
-                  this.error = "URL test successful! URL added. Plant count will update when this URL is crawled (typically overnight).";
-                } else {
-                  this.error = `URL test warning: ${testResult.message}. URL added but may have issues.`;
-                }
-
-                // Refresh the volunteer data to get updated crawlErrors count
+                // Don't push locally - let the server response be the source of truth
+                // Refresh the volunteer data to get the updated list with the new URL
                 if (this.role == 'Admin' || this.role == 'VolunteerPlus') {
                   await utils.getData(`/vendor/get?id=${this.vendor.id}`)
                   .then(json => {
-                    // Preserve the newly added URL while updating
+                    // The server should return the updated list with the new URL
                     this.vendor = json;
-
-                    // If the new URL is not in the refreshed data, add it back
-                    if (this.vendor.plantListingUris && !this.vendor.plantListingUris.some(u => u.id === newUrl.id)) {
-                      this.vendor.plantListingUris.push(newUrl);
+                    // Silently deduplicate in case server returned duplicates
+                    this.deduplicateUrls(true);
+                    
+                    if (testResult.success) {
+                      this.error = "URL test successful! URL added. Plant count will update when this URL is crawled (typically overnight).";
+                    } else {
+                      this.error = `URL test warning: ${testResult.message}. URL added but may have issues.`;
                     }
                   });
                 } else {
                   await utils.getData("/vendor/current")
                   .then(json => {
-                    // Preserve the newly added URL while updating
+                    // The server should return the updated list with the new URL
                     this.vendor = json;
-
-                    // If the new URL is not in the refreshed data, add it back
-                    if (this.vendor.plantListingUris && !this.vendor.plantListingUris.some(u => u.id === newUrl.id)) {
-                      this.vendor.plantListingUris.push(newUrl);
+                    // Silently deduplicate in case server returned duplicates
+                    this.deduplicateUrls(true);
+                    
+                    if (testResult.success) {
+                      this.error = "URL test successful! URL added. Plant count will update when this URL is crawled (typically overnight).";
+                    } else {
+                      this.error = `URL test warning: ${testResult.message}. URL added but may have issues.`;
                     }
                   });
                 }
@@ -494,11 +548,13 @@ export default Vue.extend({
                     await utils.getData(`/vendor/get?id=${this.vendor.id}`)
                     .then(json => {
                         this.vendor = json;
+                        this.deduplicateUrls(true); // Silent deduplication after test
                     });
                 } else {
                     await utils.getData("/vendor/current")
                     .then(json => {
                         this.vendor = json;
+                        this.deduplicateUrls(true); // Silent deduplication after test
                     });
                 }
             } catch (error) {

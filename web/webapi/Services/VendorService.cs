@@ -110,13 +110,39 @@ namespace webapi.Services
       
         public async Task SaveUrls(string vendorId, string[] plantListingUrls)
         {
-            var urlsForVendor = await urlRepository.FindForVendorAsync(vendorId);
-            foreach (var uri in plantListingUrls)
+            static string NormalizeUrl(string url)
             {
-                //if exist ignore, otherwise add
-                var lookupUri = urlsForVendor.FirstOrDefault(u => u.Uri == uri);
-                if (lookupUri != null) continue;
-                await urlRepository.InsertAsync(new VendorUrl { Id = Guid.NewGuid().ToString(), VendorId = vendorId, Uri = uri, LastStatus= CrawlStatus.None});
+                if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+                var normalized = url.Trim();
+                if (normalized.Length > 1 && normalized.EndsWith("/"))
+                {
+                    normalized = normalized.Substring(0, normalized.Length - 1);
+                }
+                return normalized.ToLowerInvariant();
+            }
+
+            var urlsForVendor = (await urlRepository.FindForVendorAsync(vendorId)).ToList();
+            var existingNormalized = new HashSet<string>(
+                urlsForVendor.Select(u => NormalizeUrl(u.Uri ?? "")),
+                StringComparer.Ordinal
+            );
+
+            foreach (var raw in plantListingUrls ?? Array.Empty<string>())
+            {
+                var uri = NormalizeUrl(raw);
+                if (string.IsNullOrWhiteSpace(uri)) continue;
+
+                // If exist ignore (normalized), otherwise add
+                if (existingNormalized.Contains(uri)) continue;
+
+                await urlRepository.InsertAsync(new VendorUrl
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    VendorId = vendorId,
+                    Uri = uri,
+                    LastStatus = CrawlStatus.None
+                });
+                existingNormalized.Add(uri);
             }
         }
     }

@@ -11,9 +11,32 @@ public class VendorUrlRepository : Repository<VendorUrl>
 
     }
 
+    private static string NormalizeUrl(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return url;
+        var normalized = url.Trim();
+        // Remove trailing slashes (except for root URLs like "https://example.com/")
+        if (normalized.Length > 1 && normalized.EndsWith('/'))
+        {
+            normalized = normalized.Substring(0, normalized.Length - 1);
+        }
+        // Convert to lowercase for comparison
+        return normalized.ToLowerInvariant();
+    }
+
     public VendorUrl GetByUrlOrId(VendorUrl url)
     {
-        return conn.QueryFirstOrDefault<VendorUrl>("select * from vendor_urls where \"Id\" = @id or (\"Uri\" = @Uri AND \"VendorId\" = @VendorId)", url);
+        // First try exact match (by ID or exact URI)
+        var exactMatch = conn.QueryFirstOrDefault<VendorUrl>("select * from vendor_urls where \"Id\" = @id or (\"Uri\" = @Uri AND \"VendorId\" = @VendorId)", url);
+        if (exactMatch != null) return exactMatch;
+        
+        // If no exact match, try normalized comparison to catch duplicates with trailing slashes
+        var normalizedUri = NormalizeUrl(url.Uri ?? "");
+        if (string.IsNullOrEmpty(normalizedUri)) return null;
+        
+        // Get all URLs for this vendor and check normalized versions
+        var allUrls = conn.Query<VendorUrl>("select * from vendor_urls where \"VendorId\" = @VendorId", new { url.VendorId });
+        return allUrls.FirstOrDefault(u => NormalizeUrl(u.Uri ?? "") == normalizedUri);
     }
 
     public IEnumerable<VendorUrl> FindForVendor(string vendorId)
