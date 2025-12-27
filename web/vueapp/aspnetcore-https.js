@@ -36,31 +36,50 @@ if (!fs.existsSync(certFilePath) || !fs.existsSync(keyFilePath)) {
     if (fs.existsSync(tempPemPath)) {
       const pemContent = fs.readFileSync(tempPemPath, 'utf8');
       
-      // Extract certificate (between BEGIN/END CERTIFICATE)
-      const certMatch = pemContent.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/);
-      // Extract private key (can be PRIVATE KEY or RSA PRIVATE KEY)
-      const keyMatch = pemContent.match(/-----BEGIN (?:RSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA )?PRIVATE KEY-----/);
-      
-      if (certMatch) {
-        fs.writeFileSync(certFilePath, certMatch[0]);
-        console.log(`✓ Certificate exported to ${certFilePath}`);
+      // Extract certificate(s) and private key from PEM.
+      // Note: some PEM exports include cert chains (multiple CERTIFICATE blocks).
+      const certMatches = pemContent.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g);
+      const keyMatch = pemContent.match(/-----BEGIN (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----/);
+
+      if (!certMatches || certMatches.length === 0) {
+        throw new Error(
+          `Failed to extract certificate block(s) from PEM export (${tempPemPath}). ` +
+          `Unexpected PEM format. First bytes:\n${pemContent.slice(0, 200)}`
+        );
       }
-      
-      if (keyMatch) {
-        fs.writeFileSync(keyFilePath, keyMatch[0]);
-        console.log(`✓ Key exported to ${keyFilePath}`);
+      if (!keyMatch) {
+        throw new Error(
+          `Failed to extract private key block from PEM export (${tempPemPath}). ` +
+          `Unexpected PEM format. First bytes:\n${pemContent.slice(0, 200)}`
+        );
+      }
+
+      fs.writeFileSync(certFilePath, certMatches.join('\n'));
+      console.log(`✓ Certificate exported to ${certFilePath}`);
+
+      fs.writeFileSync(keyFilePath, keyMatch[0]);
+      console.log(`✓ Key exported to ${keyFilePath}`);
+
+      // Validate output files were created and are non-empty
+      const certOk = fs.existsSync(certFilePath) && fs.statSync(certFilePath).size > 0;
+      const keyOk = fs.existsSync(keyFilePath) && fs.statSync(keyFilePath).size > 0;
+      if (!certOk || !keyOk) {
+        throw new Error(
+          `Certificate export did not produce expected output files. ` +
+          `certOk=${certOk}, keyOk=${keyOk}, cert=${certFilePath}, key=${keyFilePath}`
+        );
       }
       
       // Clean up temp file
-      if (fs.existsSync(tempPemPath)) {
-        fs.unlinkSync(tempPemPath);
-      }
+      if (fs.existsSync(tempPemPath)) fs.unlinkSync(tempPemPath);
     } else {
       console.error('Certificate file was not created');
       process.exit(1);
     }
   } catch (error) {
     console.error('Failed to export certificate:', error.message);
+    // Best-effort cleanup
+    try { if (fs.existsSync(tempPemPath)) fs.unlinkSync(tempPemPath); } catch (_) {}
     process.exit(1);
   }
 } else {
