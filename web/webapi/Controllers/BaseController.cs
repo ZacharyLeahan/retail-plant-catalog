@@ -16,7 +16,7 @@ public class BaseController : ControllerBase
         {
             var claim = User.Claims.SingleOrDefault(c => c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/sid");
             if (claim == null) return "";
-            return claim.Value;
+            return claim.Value?.Trim() ?? "";
         }
     }
 }

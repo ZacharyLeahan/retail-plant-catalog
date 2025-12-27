@@ -1,0 +1,23 @@
+{
+  "name": "retail-plant-catalog",
+  "version": "1.0.0",
+  "description": "Plant Agents Collective - Retail Plant Catalog",
+  "scripts": {
+    "setup:postgres": "node scripts/setup-postgres.js",
+    "migrate": "node scripts/run-migrations.js",
+    "create-user": "node scripts/create-user.js",
+    "promote-admin": "node scripts/promote-user.js",
+    "promote-role": "node scripts/promote-user.js",
+    "sync:plants": "node scripts/sync-plants-from-sheet.js",
+    "fix-plant-counts": "node scripts/fix-plant-counts.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.6.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
+
+

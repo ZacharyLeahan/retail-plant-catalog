@@ -90,9 +90,9 @@ const currentView = computed(() => {
 });
 const staticLinks = [
   { uri: "#/users", text: "Users", role: "Admin" },
-  { uri: "#/vendors", text: "Volunteers", role: "Admin" },
-  { uri: "#/vendors", text: "Volunteers", role: "Volunteer" },
-  { uri: "#/vendors", text: "Volunteers", role: "VolunteerPlus" },
+  { uri: "#/vendors", text: "Vendors", role: "Admin" },
+  { uri: "#/vendors", text: "Vendors", role: "Volunteer" },
+  { uri: "#/vendors", text: "Vendors", role: "VolunteerPlus" },
   { uri: "#/api-registration", text: "Register API", role: "all" },
   { uri: "#/vendor-registration", text: "Register as Volunteer", role: "all" },
   { uri: "#/login", text: "Log in", role: "all", hideIfAuth: true }

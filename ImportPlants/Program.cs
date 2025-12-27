@@ -7,10 +7,10 @@ using Newtonsoft.Json;
 using Repositories;
 using Shared;
 
-using MySqlConnector;
+using Npgsql;
 using SavvyCrawler;
 
-using var conn = new MySqlConnection("Server=127.0.0.1;Port=3306;Database=pac;Uid=root;Pwd=password;SslMode=none;");
+using var conn = new NpgsqlConnection("Host=127.0.0.1;Port=5432;Database=pac;Username=pac_user;Password=pac_password_change_me;");
 
 //ParsePlants(conn);
 //ParseNurseries(conn);
@@ -19,7 +19,7 @@ var plantRepository = new PlantRepository(conn);
 
 await AssociatePlantsToVendors(vendorRepository, plantRepository);
 
-static void ParseNurseries(MySqlConnection conn)
+static void ParseNurseries(NpgsqlConnection conn)
 {
     var vendorRepository = new VendorRepository(conn);
     var vendorUrlRepository = new VendorUrlRepository(conn);
@@ -56,7 +56,7 @@ static void ParseNurseries(MySqlConnection conn)
         }
     }
 }
-static void ParsePlants(MySqlConnection conn)
+static void ParsePlants(NpgsqlConnection conn)
 {
     var plantRepository = new PlantRepository(conn);
 

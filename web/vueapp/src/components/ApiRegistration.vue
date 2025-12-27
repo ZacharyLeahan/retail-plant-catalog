@@ -7,7 +7,7 @@
            <label> <input type="text" placeholder="Organization Name" v-model="user.organizationName"/></label>  <br />  
            <label><VuePhoneNumberInput v-model="user.phone" placeholder="Phone" :only-countries="countries"/></label>
            <label>
-            <GooglePlacesInput :address="user.address" v-on:placeChange="user.lat=$event.lat;user.lng=$event.lng;user.address=$event.address"/>
+            <GooglePlacesInput :address="user.address" v-on:placeChange="handlePlaceChange"/>
             <span class="location">({{ user.lat }}, {{ user.lng }})</span>
            </label>
            <textarea v-model="user.intendedUse" placeholder="Summary of Intended Use">
@@ -52,6 +52,8 @@
                  organizationName:"",
                  phone: "",
                  address:"",
+                 lat: 0,
+                 lng: 0,
                  intendedUse:"",
                },
                countries:["US"],
@@ -64,12 +66,23 @@
             
         },
         methods: {
+            handlePlaceChange(event) {
+                console.log("Place change event received:", event);
+                // Use Vue.set or direct assignment with $set for reactivity
+                this.$set(this.user, 'lat', event.lat);
+                this.$set(this.user, 'lng', event.lng);
+                this.$set(this.user, 'address', event.address);
+                console.log("Updated user object:", JSON.stringify(this.user));
+            },
             async submit(){
+                console.log("Submitting user data:", this.user);
                 if (!this.validate()) return;
                 var res = await utils.postData("/apiInfo/create", this.user)
                 if (res.success){
                     localStorage.setItem("flash", "API application successful, Click recycle below, to get your key. Enjoy!")
                     window.location = "#/api-key"
+                } else {
+                    this.error = res.message || "Failed to save API registration";
                 }
             }, 
             closeError(){
@@ -89,8 +102,10 @@
                 }else if (!/^\(\d{3}\) \d{3}-\d{4}$/.test(this.user.phone)){
                     this.errors.push("Phone must be a valid US number")
                 }
-                if (this.user.address?.trim().length === 0){
+                if (!this.user.address || this.user.address.trim().length === 0){
                     this.errors.push("Address is a required field")
+                } else if ((!this.user.lat || this.user.lat === 0) || (!this.user.lng || this.user.lng === 0)){
+                    this.errors.push("Please select a valid address from the autocomplete dropdown")
                 }
                 console.log("AgreeToTerms", this.agreeToTerms)
                 if (!this.agreeToTerms){

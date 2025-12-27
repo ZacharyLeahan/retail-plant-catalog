@@ -116,29 +116,54 @@ public class VendorController : BaseController
             return BadRequest(ModelState); // 400
 
         var userId = UserId;
+        
+        // Log all claims for debugging
+        logger.Info($"UserId from claims: {userId}");
+        logger.Info($"User claims: {string.Join(", ", User.Claims.Select(c => $"{c.Type}={c.Value}"))}");
 
         if (string.IsNullOrEmpty(userId))
+        {
+            logger.Error("UserId is null or empty");
             return Unauthorized(); // 401
+        }
 
         try
         {
             var vendor = VendorMapper.MapToVendor(request, userId);
 
+            logger.Info($"Looking up user with ID: '{userId}'");
             var user = userRepository.Get(userId);
 
             if (user == null)
+            {
+                logger.Error($"User not found with ID: '{userId}'. Checking if user exists in database...");
+                // Try to find user by email as a fallback
+                var allUsers = userRepository.GetAll().Take(5).ToList();
+                logger.Info($"Sample user IDs in database: {string.Join(", ", allUsers.Select(u => u.Id))}");
                 return NotFound("User not found"); // 404
+            }
+            logger.Info($"Found user: {user.Email}, Role: {user.Role}");
 
             if (user.RoleEnum == UserType.User)
             {
                 user.RoleEnum = UserType.Volunteer;
+                // Ensure ModifiedAt is UTC for PostgreSQL
+                user.ModifiedAt = DateTime.UtcNow;
+                // Ensure CreatedAt is UTC if it's not already
+                if (user.CreatedAt.Kind != DateTimeKind.Utc)
+                {
+                    user.CreatedAt = user.CreatedAt.ToUniversalTime();
+                }
                 userRepository.Update(user);
             }
 
             vendor.Approved = user.RoleEnum == UserType.Admin || user.RoleEnum == UserType.VolunteerPlus;
 
-            // Capture URLs before creating the vendor
-            var submittedUrls = vendor.PlantListingUris?.Select(u => u.Uri).ToArray() ?? Array.Empty<string>(); ;
+            // Capture URLs before creating the vendor.
+            // NOTE: Plant listing URLs are submitted in the request as `PlantListingUrls`.
+            // `vendor.PlantListingUris` is populated only after URLs are persisted in `vendor_urls`,
+            // so using it here would drop submitted URLs on create.
+            var submittedUrls = request.PlantListingUrls?.ToArray() ?? Array.Empty<string>();
 
             // Create the vendor first
             await vendorService.CreateAsync(vendor);
@@ -162,7 +187,7 @@ public class VendorController : BaseController
                             Uri = url,
                             VendorId = vendor.Id,
                             LastStatus = result.Status,
-                            LastFailed = result.Status != CrawlStatus.Ok ? DateTime.Now : null,
+                            LastFailed = result.Status != CrawlStatus.Ok ? DateTime.UtcNow : null, // PostgreSQL requires UTC DateTime
                             LastSucceeded = result.Status == CrawlStatus.Ok ? DateTime.UtcNow : null
                         };
 
@@ -366,6 +391,31 @@ public class VendorController : BaseController
         return vendorRepository.Find(storeName, state, unapprovedOnly, showDeleted, sortBy, sortAsc, skip, take);
     }
 
+    /// <summary>
+    /// Get crawl status for multiple vendors by their IDs
+    /// </summary>
+    [HttpPost]
+    [ApiExplorerSettings(GroupName = "v2")]
+    [Authorize(Roles = "Admin")]
+    [Route("CrawlStatus")]
+    public IActionResult GetCrawlStatus([FromBody] string[] vendorIds)
+    {
+        if (vendorIds == null || vendorIds.Length == 0)
+            return BadRequest("vendorIds array is required");
+
+        var statuses = new Dictionary<string, bool>();
+        foreach (var id in vendorIds)
+        {
+            var vendor = vendorRepository.Get(id);
+            // Consider crawling if CrawlStartedAt is set and within last 10 minutes (safety check for stuck crawls)
+            var isCrawling = vendor?.CrawlStartedAt != null 
+                && vendor.CrawlStartedAt.Value > DateTime.UtcNow.AddMinutes(-10);
+            statuses[id] = isCrawling;
+        }
+        
+        return Ok(statuses);
+    }
+
     [HttpPost]
     [ApiExplorerSettings(GroupName = "v2")]
     [Authorize(Roles = "Admin")]
@@ -374,18 +424,36 @@ public class VendorController : BaseController
     {
         var vendor = vendorRepository.Get(approvalRequest.Id);
         vendorRepository.Approve(approvalRequest.Id, approvalRequest.Approved);
-        if (approvalRequest.Approved)
+        
+        // Try to send email, but don't fail the approval if email sending fails
+        try
         {
-            await SendApprovalStatus(vendor.PublicEmail, "The Plant Agents Collective approves your status!");
+            if (approvalRequest.Approved)
+            {
+                await SendApprovalStatus(vendor.PublicEmail, "The Plant Agents Collective approves your status!");
+            }
+            else
+            {
+                await SendApprovalStatus(vendor.PublicEmail, "Unfortunately the Plant Agents Collective has denied your status as a vendor for the following reason: " + approvalRequest.DenialReason);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            await SendApprovalStatus(vendor.PublicEmail, "Unfortunately the Plant Agents Collective has denied your status as a vendor for the following reason: " + approvalRequest.DenialReason);
+            // Log the error but don't fail the approval operation
+            logger.Warn($"Failed to send approval email to {vendor.PublicEmail}. Approval was still processed successfully.", ex);
         }
+        
         return true;
     }
     private async Task SendApprovalStatus(string email, string copy)
     {
+        // Skip email sending if email is null or empty
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            logger.Info("Skipping approval email: email address is empty");
+            return;
+        }
+
         await amazonSes.SendEmailAsync(new SendEmailRequest
         {
             Source = "fintech@savvyotter.net",
@@ -411,14 +479,37 @@ public class VendorController : BaseController
         var vendor = vendorService.GetPopulatedVendor(id);
         if (vendor == null) return false;
 
-
-
-        plantCrawler.Init();
-        plantCrawler.Crawl(vendor).Wait();
-        var plants = plantRepository.FindByVendor(vendor.Id);
-        vendor.PlantCount = plants.Count();
-        vendor.CrawlErrors = vendor.PlantListingUris?.Count(u => u.LastStatus != CrawlStatus.None && u.LastStatus != CrawlStatus.Ok) ?? 0;
+        // Mark crawl as started
+        vendor.CrawlStartedAt = DateTime.UtcNow;
         vendorRepository.Update(vendor);
+
+        try
+        {
+            plantCrawler.Init();
+            await plantCrawler.Crawl(vendor);
+            
+            // Re-fetch vendor to get updated plant associations
+            vendor = vendorService.GetPopulatedVendor(vendor.Id);
+            var plants = plantRepository.FindByVendor(vendor.Id);
+            vendor.PlantCount = plants.Count();
+            vendor.CrawlErrors = vendor.PlantListingUris?.Count(u => u.LastStatus != CrawlStatus.None && u.LastStatus != CrawlStatus.Ok) ?? 0;
+            vendor.LastCrawled = DateTime.UtcNow;
+            vendor.LastCrawlStatus = vendor.PlantListingUris?.Any() == true 
+                ? (vendor.PlantListingUris.Any(u => u.LastStatus == CrawlStatus.Ok) ? CrawlStatus.Ok : vendor.PlantListingUris.First().LastStatus)
+                : CrawlStatus.None;
+            
+            // Save PlantCount and other crawl results
+            vendor.CrawlStartedAt = null; // Clear crawl started flag
+            vendorRepository.Update(vendor);
+        }
+        catch (Exception ex)
+        {
+            // On error, still clear the crawl started flag
+            vendor.CrawlStartedAt = null;
+            vendorRepository.Update(vendor);
+            logger.Error($"Error during crawl for vendor {id}", ex);
+            throw;
+        }
         return true;
     }
 
@@ -728,24 +819,51 @@ public class VendorController : BaseController
     {
         var vendor = vendorService.GetPopulatedVendor(id);
         if (vendor == null) return NotFound();
-        plantCrawler.Init();
-        await plantCrawler.Crawl(vendor);
-        vendor.LastCrawled = DateTime.UtcNow;
-        // Set LastCrawlStatus to the status of the most recent VendorUrl crawl
-        if (vendor.PlantListingUris != null && vendor.PlantListingUris.Length > 0)
-        {
-            var mostRecent = vendor.PlantListingUris
-                .Select(u => new { u.LastStatus, Time = u.LastSucceeded ?? u.LastFailed })
-                .Where(x => x.Time != null)
-                .OrderByDescending(x => x.Time)
-                .FirstOrDefault();
-            vendor.LastCrawlStatus = mostRecent?.LastStatus ?? CrawlStatus.None;
-        }
-        else
-        {
-            vendor.LastCrawlStatus = CrawlStatus.None;
-        }
+        
+        // Mark crawl as started
+        vendor.CrawlStartedAt = DateTime.UtcNow;
         vendorRepository.Update(vendor);
+
+        try
+        {
+            plantCrawler.Init();
+            await plantCrawler.Crawl(vendor);
+            
+            // Re-fetch vendor to get updated plant associations
+            vendor = vendorService.GetPopulatedVendor(vendor.Id);
+            var plants = plantRepository.FindByVendor(vendor.Id);
+            vendor.PlantCount = plants.Count();
+            vendor.CrawlErrors = vendor.PlantListingUris?.Count(u => u.LastStatus != CrawlStatus.None && u.LastStatus != CrawlStatus.Ok) ?? 0;
+            vendor.LastCrawled = DateTime.UtcNow;
+            
+            // Set LastCrawlStatus to the status of the most recent VendorUrl crawl
+            if (vendor.PlantListingUris != null && vendor.PlantListingUris.Length > 0)
+            {
+                var mostRecent = vendor.PlantListingUris
+                    .Select(u => new { u.LastStatus, Time = u.LastSucceeded ?? u.LastFailed })
+                    .Where(x => x.Time != null)
+                    .OrderByDescending(x => x.Time)
+                    .FirstOrDefault();
+                vendor.LastCrawlStatus = mostRecent?.LastStatus ?? CrawlStatus.None;
+            }
+            else
+            {
+                vendor.LastCrawlStatus = CrawlStatus.None;
+            }
+            
+            // Save PlantCount and other crawl results
+            vendor.CrawlStartedAt = null; // Clear crawl started flag
+            vendorRepository.Update(vendor);
+        }
+        catch (Exception ex)
+        {
+            // On error, still clear the crawl started flag
+            vendor.CrawlStartedAt = null;
+            vendorRepository.Update(vendor);
+            logger.Error($"Error during crawl for vendor {id}", ex);
+            throw;
+        }
+        
         return Ok(new
         {
             vendor,

@@ -21,7 +21,7 @@ public static class VendorMapper
             PublicPhone = request.PublicPhone,
             AllNative = request.AllNative,
             Notes = request.Notes ?? string.Empty,
-            PlantListingUrls = request.PlantListingUrls.ToArray() ?? Array.Empty<string>(),
+            PlantListingUrls = request.PlantListingUrls ?? Array.Empty<string>(),
             CreatedAt = DateTime.UtcNow,
             IsDeleted = false
         };

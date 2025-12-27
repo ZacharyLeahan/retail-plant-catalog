@@ -74,11 +74,11 @@ namespace webapi.Services
                                 plantRepository.Associate(plantId, vendor.Id);
                             }
                         }
-                        plu.LastSucceeded = DateTime.Now;
+                        plu.LastSucceeded = DateTime.UtcNow; // PostgreSQL requires UTC DateTime
                     }catch(CrawlFailException cfex)
                     {
                         plu.LastStatus = cfex.CrawlStatus;
-                        plu.LastFailed = DateTime.Now;
+                        plu.LastFailed = DateTime.UtcNow; // PostgreSQL requires UTC DateTime
                     }
                     try
                     {

@@ -26,7 +26,7 @@ public class ApiInfoController: BaseController
         if (existingInfo == null)
         {
             apiInfo.UserId = UserId; //TODO:  Move api email logic etc to this from the user creation?
-            apiInfo.CreatedAt = DateTime.Now;
+            apiInfo.CreatedAt = DateTime.UtcNow; // PostgreSQL requires UTC DateTime
             apiInfoRepository.Insert(apiInfo);
         }
         else
@@ -35,6 +35,7 @@ public class ApiInfoController: BaseController
             existingInfo.Phone = apiInfo.Phone;
             existingInfo.Lng = apiInfo.Lng;
             existingInfo.Lat = apiInfo.Lat;
+            existingInfo.Address = apiInfo.Address;
             existingInfo.IntendedUse = apiInfo.IntendedUse?.Trim();
             existingInfo.Name = apiInfo.Name;
             apiInfoRepository.Update(existingInfo);

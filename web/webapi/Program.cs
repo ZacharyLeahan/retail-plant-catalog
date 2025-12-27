@@ -6,7 +6,7 @@ using Dapper;
 using FluentLogger;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.OpenApi.Models;
-using MySqlConnector;
+using Npgsql;
 using Repositories;
 using Shared;
 using webapi.Services;
@@ -75,8 +75,23 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddScoped<IDbConnection>((container) =>
 {
     var config = container.GetService<IConfiguration>();
+    
+    // Try to get connection string from environment variables first
     var connStr = config?.GetConnectionString("app");
-    return new MySqlConnection(connStr);
+    
+    // If not set, construct from individual POSTGRES_* environment variables
+    if (string.IsNullOrEmpty(connStr))
+    {
+        var host = config?["POSTGRES_HOST"] ?? "localhost";
+        var port = config?["POSTGRES_PORT"] ?? "5432";
+        var database = config?["POSTGRES_DATABASE"] ?? "pac";
+        var username = config?["POSTGRES_USER"] ?? "pac_user";
+        var password = config?["POSTGRES_PASSWORD"] ?? "";
+        
+        connStr = $"Host={host};Port={port};Database={database};Username={username};Password={password};";
+    }
+    
+    return new NpgsqlConnection(connStr);
 });
 builder.Services.AddSingleton((container) =>
 {
@@ -120,7 +135,7 @@ app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "API V1");
-    //c.SwaggerEndpoint("/swagger/v2/swagger.json", "API V2");
+    c.SwaggerEndpoint("/swagger/v2/swagger.json", "API V2");
 });
 
 app.UseDefaultFiles(new DefaultFilesOptions { DefaultFileNames = new string[] { "index.html" } });

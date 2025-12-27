@@ -11,7 +11,7 @@ public class InviteRepository : Repository<Invite>
     }
     public Invite Get(string id)
     {
-        return conn.QueryFirstOrDefault<Invite>("select * from user_invite where Id = @id", new { id });
+        return conn.QueryFirstOrDefault<Invite>("select * from user_invite where \"Id\" = @id", new { id });
     }
     public override long Insert(Invite obj)
     {

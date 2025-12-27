@@ -30,33 +30,41 @@ export default Vue.extend({
         placeAutocomplete.addEventListener(
           "gmp-select",
           async ({ placePrediction }) => {
-            const place = placePrediction.toPlace();
-            console.log("User selected " + place.location.l);
-            await place.fetchFields({
-              fields: ["formattedAddress", "location", "addressComponents"],
-            });
+            try {
+              const place = await placePrediction.toPlace();
+              console.log("Place object:", place);
+              
+              await place.fetchFields({
+                fields: ["formattedAddress", "location", "addressComponents"],
+              });
 
-            const lat = place.location.lat();
-            const lng = place.location.lng();
+              const lat = place.location.lat();
+              const lng = place.location.lng();
 
-            const components = place.addressComponents;
+              const components = place.addressComponents;
 
-            const state =
-              components.find((c) =>
-                c.types.includes("administrative_area_level_1")
-              )?.shortText || "";
+              const state =
+                components.find((c) =>
+                  c.types.includes("administrative_area_level_1")
+                )?.shortText || "";
 
-            const address = `${components[0]?.shortText || ""} ${
-              components[1]?.shortText || ""
-            }, ${components[2]?.shortText || ""}, ${state}`;
+              // Use formattedAddress from Google Places API instead of constructing it
+              const address = place.formattedAddress || `${components[0]?.shortText || ""} ${
+                components[1]?.shortText || ""
+              }, ${components[2]?.shortText || ""}, ${state}`;
 
-            this.$emit("placeChange", {
-              lat,
-              lng,
-              address,
-              state,
-              place,
-            });
+              console.log("Place selected - emitting:", { lat, lng, address, state });
+
+              this.$emit("placeChange", {
+                lat,
+                lng,
+                address,
+                state,
+                place,
+              });
+            } catch (error) {
+              console.error("Error processing place selection:", error);
+            }
           }
         );
       }

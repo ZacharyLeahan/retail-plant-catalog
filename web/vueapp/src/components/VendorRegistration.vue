@@ -255,7 +255,24 @@ export default Vue.extend({
             if (!didValidate) return;
             console.log(this.vendor)
             if (this.vendor.id == undefined){
-                var result = await utils.postData("/vendor/createclient", this.vendor)
+                // Map plantListingUris (array of objects) to plantListingUrls (string array)
+                // Create explicit payload with only the properties the backend expects
+                var plantListingUrls = (this.vendor.plantListingUris || []).map(u => u.uri || u).filter(u => u);
+                var payload = {
+                    storeName: this.vendor.storeName,
+                    address: this.vendor.address,
+                    state: this.vendor.state,
+                    lat: this.vendor.lat,
+                    lng: this.vendor.lng,
+                    storeUrl: this.vendor.storeUrl,
+                    publicEmail: this.vendor.publicEmail,
+                    publicPhone: this.vendor.publicPhone,
+                    allNative: this.vendor.allNative || false,
+                    notes: this.vendor.notes || "",
+                    plantListingUrls: plantListingUrls
+                };
+                console.log("Payload being sent:", payload);
+                var result = await utils.postData("/vendor/createclient", payload)
                 if (result.success)
                     window.location = result.redirectUrl
             }else{
@@ -315,7 +332,8 @@ export default Vue.extend({
                 this.errors.push("There must be at least one Plant Listing URL.  Be sure to hit the add button")
             }else{
                 console.log("listing urls breakpoint")
-                for (var uri of this.vendor.plantListingUris){
+                for (var uriObj of this.vendor.plantListingUris){
+                    var uri = uriObj.uri || uriObj; // Handle both object and string formats
                     console.log("Evaluating url: " + uri)
                     var result = await utils.getData("/vendor/IsAllowed?Url=" + encodeURIComponent(uri))
                     if (!result.success){

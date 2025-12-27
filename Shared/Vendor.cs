@@ -56,6 +56,8 @@ namespace Shared
 
         public CrawlStatus LastCrawlStatus {get;set;} = CrawlStatus.None;
 
+        public DateTime? CrawlStartedAt { get; set; }
+
     }
 
     public class VendorPlus : Vendor

@@ -71,10 +71,12 @@ public class UserController : BaseController
         user.RoleEnum = UserType.User;
         user.CreatedAt = DateTime.UtcNow;
         user.ModifiedAt = DateTime.UtcNow;
+        user.Verified = true; // Auto-verify for local development (skip email verification)
         userRepository.Insert(user);
         var invite = new Invite(Guid.NewGuid().ToString(),user.Id, DateTime.UtcNow.AddHours(2), userRequest.RedirectUrl);
         inviteRepository.Insert(invite);
-        await SendInvite(user, invite);
+        // Skip sending invite email for local development
+        // await SendInvite(user, invite);
         return new GenericResponse { Success = true, Message = "User created Successfully", Id = user.Id};
     }
 
@@ -196,7 +198,7 @@ public class UserController : BaseController
         var existingUser = userRepository.Get(user.Id);
         //if (existingUser == null) return null;
         existingUser.Email = user.Email;
-        existingUser.ModifiedAt = DateTime.Now;
+        existingUser.ModifiedAt = DateTime.UtcNow; // PostgreSQL requires UTC DateTime
         if (existingUser.Password != null && user.Password != null)
         {
             var passwordHasher = new PasswordHasher<User>();
@@ -305,7 +307,7 @@ public class UserController : BaseController
         {
             var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.Sid, user.Id ?? ""),
+                new Claim(ClaimTypes.Sid, (user.Id ?? "").Trim()),
                 new Claim(ClaimTypes.Name, user.Email),
                 new Claim(ClaimTypes.Role, user.Role ?? "User"),
             };

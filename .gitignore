@@ -1,4 +1,19 @@
+.cursor/
+
 *.env
+.env.local
+
+# scripts output files
+scripts/cache/
+scripts/incomplete_vendors.jsonl
+
+# OpenAI/PAC endpoint scripts (temporary)
+scripts/temp_scripts_openai/
+
+# Reference repository
+REFERNCE REPO/
+
+TEST/
 
 # globs
 Makefile.in
@@ -371,6 +386,12 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc
+
+# Python virtual environments
+venv/
+.venv/
+env/
+.env/
 
 # Cake - Uncomment if you are using it
 # tools/**
