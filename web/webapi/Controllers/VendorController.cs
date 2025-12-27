@@ -803,16 +803,35 @@ public class VendorController : BaseController
             // Initialize the plant crawler (needed for term lookup)
             plantCrawler.Init();
 
-            // Test the URL without doing the full crawl
-            var result = await plantCrawler.TestUrl(request.Url);
+            // Test the URL without doing the full crawl.
+            // IMPORTANT: This endpoint is used before a vendor is saved (no VendorId yet).
+            // We want a lightweight, non-blocking validation.
+            //
+            // The crawler can sometimes return CrawlStatus.Missing for transient/non-404 issues
+            // (e.g., bot protection, flaky network). We treat those as "pending/unverified"
+            // so the user isn't shown a scary false-negative.
+            var result = await plantCrawler.TestUrl(request.Url.Trim());
 
             // Generate a temporary ID for the URL to be referenced in the UI
             string tempUrlId = Guid.NewGuid().ToString();
 
+            // Only hard-fail on obvious bad input. Otherwise, return a neutral status.
+            if (result.Status == CrawlStatus.UrlParsingError)
+            {
+                return new GenericResponse
+                {
+                    Success = false,
+                    Message = result.Status.ToString(),
+                    Id = tempUrlId
+                };
+            }
+
+            // If the crawler couldn't confidently validate, mark as "None" (pending).
+            var message = result.Status == CrawlStatus.Ok ? CrawlStatus.Ok.ToString() : CrawlStatus.None.ToString();
             return new GenericResponse
             {
-                Success = result.Status == CrawlStatus.Ok,
-                Message = result.Status.ToString(),
+                Success = true,
+                Message = message,
                 Id = tempUrlId
             };
         }

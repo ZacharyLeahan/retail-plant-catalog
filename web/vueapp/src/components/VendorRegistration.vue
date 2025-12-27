@@ -89,11 +89,18 @@
           task_alt
         </span>
         <span
-          v-if="v.lastStatus == 'None' || v.lastStatus == 'Ok'"
+          v-if="v.lastStatus == 'Ok'"
           class="success-tag"
           :title="prettyDate('Last successful crawl:', v.lastSucceeded)"
           ><span class="material-symbols-outlined">check_circle</span>
           Success</span
+        >
+        <span
+          v-else-if="v.lastStatus == 'None'"
+          class="pending-tag"
+          title="Pending verification (will be checked when you Test URL or Crawl)"
+          ><span class="material-symbols-outlined">hourglass_empty</span>
+          Pending</span
         >
         <span
           v-else
@@ -502,10 +509,13 @@ export default Vue.extend({
                // Add the URL to the list
                this.vendor.plantListingUris.push(newUrl);
 
-               if (validateResult.success) {
+               if (!validateResult.success) {
+                 this.error = `URL validation failed: ${validateResult.message}.`;
+               } else if (validateResult.message === "Ok") {
                  this.error = "URL validation successful! URL added. Plant count will update when this URL is crawled (typically overnight).";
                } else {
-                 this.error = `URL validation warning: ${validateResult.message}. URL added but may have issues.`;
+                 // Treat as "pending" rather than a scary warning (common with transient bot protection/network)
+                 this.error = "URL added. Verification pending — after you Save, use the Test URL button (or Crawl) to confirm.";
                }
              } catch (error) {
                console.error("URL validation error:", error);
@@ -574,6 +584,10 @@ input[type="checkbox"] {
 }
 .success-tag {
   color: green;
+  margin-left: 10px;
+}
+.pending-tag {
+  color: #6c757d;
   margin-left: 10px;
 }
 .error-holder {
