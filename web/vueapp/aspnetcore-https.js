@@ -25,63 +25,92 @@ const certFilePath = path.join(baseFolder, `${certificateName}.pem`);
 const keyFilePath = path.join(baseFolder, `${certificateName}.key`);
 
 if (!fs.existsSync(certFilePath) || !fs.existsSync(keyFilePath)) {
-  // Export certificate as PEM (includes both cert and key in one file)
+  // Use PFX format which includes the private key, then convert to PEM
+  const tempPfxPath = path.join(baseFolder, `${certificateName}.temp.pfx`);
   const tempPemPath = path.join(baseFolder, `${certificateName}.temp.pem`);
   
-  try {
-    // Export certificate synchronously
-    execSync(`dotnet dev-certs https --export-path "${tempPemPath}" --format Pem --no-password`, { stdio: 'inherit' });
-    
-    // Read the PEM file and split it into cert and key
-    if (fs.existsSync(tempPemPath)) {
-      const pemContent = fs.readFileSync(tempPemPath, 'utf8');
-      
-      // Extract certificate(s) and private key from PEM.
-      // Note: some PEM exports include cert chains (multiple CERTIFICATE blocks).
-      const certMatches = pemContent.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g);
-      const keyMatch = pemContent.match(/-----BEGIN (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |ENCRYPTED )?PRIVATE KEY-----/);
-
-      if (!certMatches || certMatches.length === 0) {
-        throw new Error(
-          `Failed to extract certificate block(s) from PEM export (${tempPemPath}). ` +
-          `Unexpected PEM format. First bytes:\n${pemContent.slice(0, 200)}`
-        );
-      }
-      if (!keyMatch) {
-        throw new Error(
-          `Failed to extract private key block from PEM export (${tempPemPath}). ` +
-          `Unexpected PEM format. First bytes:\n${pemContent.slice(0, 200)}`
-        );
-      }
-
-      fs.writeFileSync(certFilePath, certMatches.join('\n'));
-      console.log(`✓ Certificate exported to ${certFilePath}`);
-
-      fs.writeFileSync(keyFilePath, keyMatch[0]);
-      console.log(`✓ Key exported to ${keyFilePath}`);
-
-      // Validate output files were created and are non-empty
-      const certOk = fs.existsSync(certFilePath) && fs.statSync(certFilePath).size > 0;
-      const keyOk = fs.existsSync(keyFilePath) && fs.statSync(keyFilePath).size > 0;
-      if (!certOk || !keyOk) {
-        throw new Error(
-          `Certificate export did not produce expected output files. ` +
-          `certOk=${certOk}, keyOk=${keyOk}, cert=${certFilePath}, key=${keyFilePath}`
-        );
-      }
-      
-      // Clean up temp file
-      if (fs.existsSync(tempPemPath)) fs.unlinkSync(tempPemPath);
-    } else {
-      console.error('Certificate file was not created');
-      process.exit(1);
+  // Clean up any existing temp files first
+  [tempPfxPath, tempPemPath].forEach(tempPath => {
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch (_) {}
     }
+  });
+  
+  try {
+    console.log('Exporting HTTPS certificate...');
+    
+    // Export as PFX (includes private key on Windows)
+    execSync(`dotnet dev-certs https --export-path "${tempPfxPath}" --format Pfx --no-password`, { stdio: 'inherit' });
+    
+    if (!fs.existsSync(tempPfxPath)) {
+      throw new Error('PFX certificate file was not created');
+    }
+    
+    // Check if OpenSSL is available to convert PFX to PEM
+    let opensslAvailable = false;
+    try {
+      execSync('openssl version', { stdio: 'pipe' });
+      opensslAvailable = true;
+    } catch (_) {
+      // OpenSSL not available, will use alternative method
+    }
+    
+    if (opensslAvailable) {
+      // Use OpenSSL to convert PFX to PEM with separate cert and key
+      console.log('Converting certificate to PEM format...');
+      execSync(`openssl pkcs12 -in "${tempPfxPath}" -out "${tempPemPath}" -nodes -nocerts`, { stdio: 'inherit' });
+      const keyContent = fs.readFileSync(tempPemPath, 'utf8');
+      fs.writeFileSync(keyFilePath, keyContent);
+      
+      execSync(`openssl pkcs12 -in "${tempPfxPath}" -out "${tempPemPath}" -nodes -nokeys -clcerts`, { stdio: 'inherit' });
+      const certContent = fs.readFileSync(tempPemPath, 'utf8');
+      fs.writeFileSync(certFilePath, certContent);
+      
+      console.log(`✓ Certificate exported to ${certFilePath}`);
+      console.log(`✓ Key exported to ${keyFilePath}`);
+    } else {
+      // OpenSSL not available - skip HTTPS setup
+      // vue.config.js will automatically fall back to HTTP
+      console.warn('⚠️  OpenSSL not found. Skipping HTTPS certificate setup.');
+      console.warn('   The Vue dev server will use HTTP instead of HTTPS (acceptable for development).');
+      console.warn('   To enable HTTPS, install OpenSSL:');
+      console.warn('   - Download from https://slproweb.com/products/Win32OpenSSL.html');
+      console.warn('   - Or use Chocolatey: choco install openssl');
+      console.warn('   - Or use WSL: openssl is pre-installed');
+      // Don't throw - allow dev server to start with HTTP fallback
+    }
+
+    // Validate output files were created and are non-empty
+    const certOk = fs.existsSync(certFilePath) && fs.statSync(certFilePath).size > 0;
+    const keyOk = fs.existsSync(keyFilePath) && fs.statSync(keyFilePath).size > 0;
+    if (!certOk || !keyOk) {
+      throw new Error(
+        `Certificate export did not produce expected output files. ` +
+        `certOk=${certOk}, keyOk=${keyOk}, cert=${certFilePath}, key=${keyFilePath}`
+      );
+    }
+    
+    // Clean up temp files
+    [tempPfxPath, tempPemPath].forEach(tempPath => {
+      if (fs.existsSync(tempPath)) {
+        try {
+          fs.unlinkSync(tempPath);
+        } catch (_) {}
+      }
+    });
   } catch (error) {
-    console.error('Failed to export certificate:', error.message);
+    console.warn('⚠️  Certificate export failed:', error.message);
     // Best-effort cleanup
-    try { if (fs.existsSync(tempPemPath)) fs.unlinkSync(tempPemPath); } catch (_) {}
-    process.exit(1);
+    [tempPfxPath, tempPemPath].forEach(tempPath => {
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (_) {}
+    });
+    console.warn('   The Vue dev server will use HTTP instead of HTTPS (acceptable for development).');
+    console.warn('   The backend API will still use HTTPS.');
+    // Don't exit with error - let Vue dev server start with HTTP fallback
+    // Exit with success code (0) so npm start continues
   }
 } else {
-  console.log('Certificate files already exist');
+  console.log('A valid HTTPS certificate is already present.');
 }

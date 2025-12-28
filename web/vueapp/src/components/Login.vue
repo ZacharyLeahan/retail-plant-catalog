@@ -54,28 +54,39 @@
                     var redirectUrl = query.split("=")[1]
                 }
                 this.error = "";
-                var result = await utils.postData("/user/login", this.user)
-                if (result.success){
-                    //get the role and store it in local storage or memory
-                    console.log(result)
-                    if (result.verified){
-                        localStorage.setItem('role', result.role)
-                        localStorage.setItem('email', result.email)
-                        GlobalEventEmitter.$emit('userLoggedIn')
-                        if (redirectUrl){
-                            window.location = decodeURIComponent(redirectUrl);
-                            return;
-                        }
-                        if (result.role == 'Admin'){
-                            window.location = "/#/vendors"
+                try {
+                    var result = await utils.postData("/user/login", this.user)
+                    // Handle both camelCase and PascalCase response properties
+                    var success = result.success !== undefined ? result.success : result.Success;
+                    var verified = result.verified !== undefined ? result.verified : result.Verified;
+                    var role = result.role || result.Role;
+                    var email = result.email || result.Email;
+                    
+                    if (success){
+                        //get the role and store it in local storage or memory
+                        console.log(result)
+                        if (verified){
+                            localStorage.setItem('role', role)
+                            localStorage.setItem('email', email)
+                            GlobalEventEmitter.$emit('userLoggedIn')
+                            if (redirectUrl){
+                                window.location = decodeURIComponent(redirectUrl);
+                                return;
+                            }
+                            if (role == 'Admin'){
+                                window.location = "/#/vendors"
+                            }else{
+                                window.location = "/#/";
+                            }
                         }else{
-                            window.location = "/#/";
+                            this.error = "Please check your email for the verification email before your first login";
                         }
                     }else{
-                        this.error = "Please check your email for the verification email before your first login";
+                        this.error = "Authentication attempt failed";
                     }
-                }else{
-                    this.error = "Authentication attempt failed";
+                } catch (error) {
+                    console.error("Login error:", error);
+                    this.error = "Login failed. Please check your credentials and try again.";
                 }
             },
             closeError(){

@@ -13,18 +13,38 @@ public class UserRepository : Repository<User>
 
     public IEnumerable<User> Find(bool showAdminOnly, int skip, int take)
     {
+        IEnumerable<User> users;
         if (showAdminOnly)
-            return conn.Query<User>("select u.*, api.\"IntendedUse\" from \"user\" u left join api_info api on api.\"UserId\" = u.\"Id\" where u.\"Role\" = 'Admin' order by u.\"Email\" limit @take offset @skip", new { skip, take });
-        return conn.Query<User>("select u.*, api.\"IntendedUse\" from \"user\" u left join api_info api on api.\"UserId\" = u.\"Id\" order by u.\"Email\" limit @take offset @skip", new { skip, take });
+            users = conn.Query<User>("select u.*, api.\"IntendedUse\" from \"user\" u left join api_info api on api.\"UserId\" = u.\"Id\" where u.\"Role\" = 'Admin' order by u.\"Email\" limit @take offset @skip", new { skip, take });
+        else
+            users = conn.Query<User>("select u.*, api.\"IntendedUse\" from \"user\" u left join api_info api on api.\"UserId\" = u.\"Id\" order by u.\"Email\" limit @take offset @skip", new { skip, take });
+        
+        // Trim user IDs to handle whitespace issues
+        foreach (var user in users)
+        {
+            if (user.Id != null)
+                user.Id = user.Id.Trim();
+        }
+        return users;
     }
 
     public IEnumerable<User> Find(bool showAdminOnly, string? email, int skip, int take)
     {
         if (string.IsNullOrEmpty(email)) return Find(showAdminOnly, skip, take);
         email = $"%{email}%";
+        IEnumerable<User> users;
         if (showAdminOnly)
-            return conn.Query<User>("select * from \"user\" where \"Role\" = 'Admin' and \"Email\" like @email order by \"Email\" limit @take offset @skip", new { email, skip, take });
-        return conn.Query<User>("select * from \"user\" where \"Email\" like @email order by \"Email\" limit @take offset @skip", new { email, skip, take });
+            users = conn.Query<User>("select * from \"user\" where \"Role\" = 'Admin' and \"Email\" like @email order by \"Email\" limit @take offset @skip", new { email, skip, take });
+        else
+            users = conn.Query<User>("select * from \"user\" where \"Email\" like @email order by \"Email\" limit @take offset @skip", new { email, skip, take });
+        
+        // Trim user IDs to handle whitespace issues
+        foreach (var user in users)
+        {
+            if (user.Id != null)
+                user.Id = user.Id.Trim();
+        }
+        return users;
     }
 
     public User FindByEmail(string email)

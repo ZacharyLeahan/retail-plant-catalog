@@ -110,7 +110,20 @@ export default Vue.extend({
 
             await utils.getData(`user/search?showAdminOnly=${this.showAdminOnly}&skip=${skip}&take=${this.paging}`, {redirect: "manual"})
                 .then(json => {
-                    this.post = json;
+                    // Ensure json is an array and normalize user IDs
+                    if (Array.isArray(json)) {
+                        this.post = json.map((user) => {
+                            // Normalize ID field - ensure we have both id and Id for compatibility
+                            if (user.Id && !user.id) user.id = user.Id;
+                            if (user.id && !user.Id) user.Id = user.id;
+                            // Trim IDs to prevent duplicate key warnings
+                            if (user.id) user.id = user.id.trim();
+                            if (user.Id) user.Id = user.Id.trim();
+                            return user;
+                        });
+                    } else {
+                        this.post = [];
+                    }
                     this.count = this.post.length;
                     this.loading = false;
                     return;
