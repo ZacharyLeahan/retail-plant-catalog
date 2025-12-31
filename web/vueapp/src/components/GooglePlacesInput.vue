@@ -21,17 +21,19 @@ export default Vue.extend({
         clearInterval(waitForGoogle);
         console.log("Google Places input has mounted successfully");
         const placeAutocomplete =
-          new window.google.maps.places.PlaceAutocompleteElement();
-        placeAutocomplete.types = ["geocode"];
-        placeAutocomplete.componentRestrictions = { country: ["us"] };
+          new window.google.maps.places.PlaceAutocompleteElement({
+            includedPrimaryTypes: ["geocode"],
+            includedRegionCodes: ["us"],
+          });
 
         this.$refs.autocompleteContainer.appendChild(placeAutocomplete);
 
         placeAutocomplete.addEventListener(
           "gmp-select",
-          async ({ placePrediction }) => {
+          async (event) => {
+            const placePrediction = event.placePrediction;
             const place = placePrediction.toPlace();
-            console.log("User selected " + place.location.l);
+            console.log("User selected place:", place);
             await place.fetchFields({
               fields: ["formattedAddress", "location", "addressComponents"],
             });
